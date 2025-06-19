@@ -14,8 +14,7 @@ class LearningEngine:
         self.data_dir = "user_data"
         self.data_file = f"{self.data_dir}/{self.user_id}_preferences.pkl"
         self.interaction_log = f"{self.data_dir}/{self.user_id}_interactions.log"
-        
-        # Datos del usuario
+
         self.preferences = {
             'frequent_commands': defaultdict(int),
             'preferred_responses': {},
@@ -26,19 +25,35 @@ class LearningEngine:
             'command_patterns': defaultdict(list),
             'media_patterns': []
         }
-        
-        # Modelos de similitud
+
         self.vectorizer = TfidfVectorizer(max_features=500)
         self.knn = NearestNeighbors(n_neighbors=1, algorithm='ball_tree')
         self.commands_db = []
-        
+
         self.load_data()
 
-    # ... (métodos load_data, save_data, log_interaction del anterior)
+    def load_data(self):
+        if os.path.exists(self.data_file):
+            with open(self.data_file, 'rb') as f:
+                self.preferences = pickle.load(f)
+
+    def save_data(self):
+        os.makedirs(self.data_dir, exist_ok=True)
+        with open(self.data_file, 'wb') as f:
+            pickle.dump(self.preferences, f)
+
+    def log_interaction(self, command, response, success):
+        os.makedirs(self.data_dir, exist_ok=True)
+        with open(self.interaction_log, 'a') as f:
+            log = json.dumps({
+                'timestamp': datetime.now().isoformat(),
+                'command': command,
+                'response': response,
+                'success': success
+            })
+            f.write(log + "\n")
 
     def analyze_interaction_patterns(self):
-        """Analiza patrones para mejorar respuestas"""
-        # Actualiza patrones de comandos de medios
         if os.path.exists(self.interaction_log):
             with open(self.interaction_log, 'r') as f:
                 for line in f:
@@ -51,10 +66,8 @@ class LearningEngine:
             self.save_data()
 
     def _extract_media_pattern(self, command):
-        """Extrae patrones de comandos de medios"""
         words = command.lower().split()
         triggers = ["reproduce", "pon", "abre", "quiero"]
-        
         for i, word in enumerate(words):
             if word in triggers and i < len(words)-1:
                 pattern = " ".join(words[i:i+2])
@@ -64,34 +77,25 @@ class LearningEngine:
         return False
 
     def get_contextual_response(self, command, context):
-        """Genera respuesta considerando contexto"""
-        # 1. Buscar respuesta exacta
         if command in self.preferences['preferred_responses']:
             return self.preferences['preferred_responses'][command]
-        
-        # 2. Buscar por similitud semántica
+
         similar = self._find_similar_command(command)
         if similar:
             response = self.preferences['preferred_responses'].get(similar)
             if response:
                 return self._adapt_response(response, context)
-        
-        # 3. Generar basado en patrones
+
         return None
 
     def _adapt_response(self, response, context):
-        """Adapta una respuesta al contexto actual"""
-        # Reemplazar marcadores de tiempo
         if "[hora]" in response:
             current_time = datetime.now().strftime("%H:%M")
             response = response.replace("[hora]", current_time)
-        
-        # Agregar nombre si no está
+
         if "[nombre]" in response:
             response = response.replace("[nombre]", context.get('user_name', ''))
         elif not any(response.startswith(x) for x in ["Señor", context.get('user_name', '')]):
             response = f"{context.get('user_name', 'Señor')}, {response}"
-        
-        return response
 
-    # ... (otros métodos del anterior)
+        return response

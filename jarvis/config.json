@@ -1,14 +1,13 @@
 {
-    "activation_word": "jarvis",
-    "user_name": "Señor",
-    "response_delay": 2.0,
-    "voice_settings": {
-        "rate": 160,
-        "volume": 0.9,
-        "pitch": 110
-    },
-    "web_settings": {
-        "timeout": 15,
-        "youtube_autoplay": true
-    }
+  "activation_word": "jarvis",
+  "user_name": "Señor",
+  "response_delay": 2.0,
+  "voice_settings": {
+    "rate": 160,
+    "volume": 0.9
+  },
+  "web_settings": {
+    "timeout": 15,
+    "youtube_autoplay": true
+  }
 }
