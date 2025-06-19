@@ -7,19 +7,24 @@ import webbrowser
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 import time
+import uuid
+from playsound import playsound
 
 # ======================= CONFIGURACIÓN ==========================
 OLLAMA_URL = "http://localhost:11434/api/generate"
 MODEL = "gemma:2b"
-VOICE_ID = "es-MX-DaliaNeural"  # alternativa: "es-ES-ElviraNeural", "es-US-PalomaNeural"
+VOICE_ID = "es-MX-DaliaNeural"  # Voz cercana a español latino
 
 # ======================== TTS NATURAL ===========================
 async def speak(text):
     try:
         from edge_tts import Communicate
         print(f"🤖 {text}")
+        nombre_temp = f"temp_{uuid.uuid4().hex}.mp3"
         tts = Communicate(text, voice=VOICE_ID)
-        await tts.play()
+        await tts.save(nombre_temp)
+        playsound(nombre_temp)
+        os.remove(nombre_temp)
     except Exception as e:
         print(f"❌ Error en TTS: {e}")
 
