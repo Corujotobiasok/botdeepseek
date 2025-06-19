@@ -1,138 +1,96 @@
+import ollama
+import queue
+import sounddevice as sd
+import numpy as np
+import pyttsx3
+import json
 import os
+import sys
 import time
-import threading
-import speech_recognition as sr
-from gtts import gTTS
-import pygame
-from ollama import Client
-import tempfile
+from vosk import Model, KaldiRecognizer
 
-# Configuración inicial
-client = Client(host='http://localhost:11434')
-model_name = 'gemma:2b'
+# Ruta al modelo de voz (cambia esto según tu sistema)
+VOSK_MODEL_PATH = "modelos/vosk-es"
 
-# Configurar pygame para reproducción de audio
-pygame.mixer.init()
+# Inicializamos Text to Speech con acento argentino
+engine = pyttsx3.init()
+engine.setProperty('rate', 160)  # velocidad
+engine.setProperty('volume', 1.0)
 
-# Configuración del reconocimiento de voz
-recognizer = sr.Recognizer()
-recognizer.pause_threshold = 2.0
-recognizer.phrase_threshold = 0.8
-recognizer.non_speaking_duration = 0.8
+# Seleccionamos una voz con acento español (argento si está disponible)
+for voice in engine.getProperty('voices'):
+    if "spanish" in voice.name.lower() or "español" in voice.name.lower():
+        engine.setProperty('voice', voice.id)
+        break
 
-def hablar(texto):
-    """Función para convertir texto a voz con acento argentino y velocidad ajustada"""
-    try:
-        # Ajustar el texto para que suene más natural en argentino
-        texto_ajustado = texto.replace("tú", "vos").replace("ti", "vos").replace("tuyo", "tuyo")
-        
-        # Crear el archivo de audio con velocidad un 10% más rápida (1.1)
-        tts = gTTS(text=texto_ajustado, lang='es', tld='com.ar', slow=False)
-        
-        # Usar un archivo temporal con nombre único para evitar problemas de permisos
-        with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as temp_file:
-            temp_filename = temp_file.name
-        
-        tts.save(temp_filename)
-        
-        # Reproducir el audio
-        pygame.mixer.music.load(temp_filename)
-        pygame.mixer.music.play()
-        
-        # Esperar a que termine la reproducción
-        while pygame.mixer.music.get_busy():
-            time.sleep(0.1)
-            
-        # Cerrar y eliminar el archivo temporal
-        pygame.mixer.music.stop()
-        try:
-            os.unlink(temp_filename)
-        except:
-            pass
-        
-    except Exception as e:
-        print(f"Error en la función hablar: {e}")
+# Inicializamos Vosk
+if not os.path.exists(VOSK_MODEL_PATH):
+    print("¡Error! No se encontró el modelo de Vosk. Descargalo desde https://alphacephei.com/vosk/models")
+    sys.exit(1)
 
-def escuchar():
-    """Función para escuchar y convertir voz a texto"""
-    with sr.Microphone() as source:
-        print("Escuchando... (di algo)")
-        recognizer.adjust_for_ambient_noise(source, duration=0.5)
-        
-        try:
-            audio = recognizer.listen(source, timeout=10, phrase_time_limit=15)
-            print("Procesando...")
-            
-            texto = recognizer.recognize_google(audio, language="es-AR")
-            print(f"Tú dijiste: {texto}")
-            return texto.lower()
-            
-        except sr.WaitTimeoutError:
-            print("Tiempo de espera agotado, no se detectó voz.")
-            return ""
-        except sr.UnknownValueError:
-            print("No pude entender lo que dijiste.")
-            return ""
-        except Exception as e:
-            print(f"Error en el reconocimiento de voz: {e}")
-            return ""
+model = Model(VOSK_MODEL_PATH)
+rec = KaldiRecognizer(model, 16000)
+q = queue.Queue()
 
-def generar_respuesta(prompt):
-    """Función para generar una respuesta usando Ollama con Gemma:2b"""
-    try:
-        response = client.generate(
-            model=model_name,
-            prompt=f"Responde en español argentino, de manera coloquial pero educada. {prompt}",
-            stream=False,
-            options={
-                'temperature': 0.7,
-                'num_ctx': 2048
-            }
-        )
-        
-        respuesta = response['response'].strip()
-        
-        replacements = {
-            "puedo ayudarte": "te puedo dar una mano",
-            "puedes preguntarme": "podés preguntarme",
-            "tú": "vos",
-            "para ti": "para vos",
-            "cierto": "posta",
-            "claro": "dale",
-            "por favor": "porfa",
-            "bueno": "buenísimo",
-            "excelente": "re bueno",
-            "perfecto": "joya"
-        }
-        
-        for original, reemplazo in replacements.items():
-            respuesta = respuesta.replace(original, reemplazo)
-            
-        return respuesta
-        
-    except Exception as e:
-        print(f"Error al generar la respuesta: {e}")
-        return "Che, no pude procesar tu pregunta. ¿Podés repetirla?"
+def callback(indata, frames, time, status):
+    if status:
+        print(status, file=sys.stderr)
+    q.put(bytes(indata))
 
-def conversacion():
-    """Función principal para manejar la conversación"""
-    hablar("¡Hola che! ¿Cómo andás? Decime en qué te puedo dar una mano.")
-    
+def escuchar_microfono(timeout=15):
+    print("🎤 Esperando tu pregunta (tomate tu tiempo)...")
+    with sd.RawInputStream(samplerate=16000, blocksize=8000, dtype='int16',
+                           channels=1, callback=callback):
+        data = bytes()
+        start_time = time.time()
+
+        while True:
+            if time.time() - start_time > timeout:
+                print("⏱️ Tiempo de escucha agotado.")
+                break
+            try:
+                data += q.get(timeout=timeout)
+                if rec.AcceptWaveform(data):
+                    result = json.loads(rec.Result())
+                    texto = result.get("text", "")
+                    if texto:
+                        print(f"🗣️ Dijiste: {texto}")
+                        return texto
+            except queue.Empty:
+                pass
+    return ""
+
+def responder_voz(texto):
+    print(f"🤖 Jarvis dice: {texto}")
+    engine.say(texto)
+    engine.runAndWait()
+
+def responder_con_gemma(prompt):
+    print("🧠 Pensando con Gemma...")
+    respuesta = ollama.chat(
+        model="gemma:2b",
+        messages=[
+            {"role": "system", "content": "Actuá como un asistente argentino muy piola, con respuestas naturales y empáticas."},
+            {"role": "user", "content": prompt}
+        ]
+    )
+    return respuesta['message']['content']
+
+def main():
+    print("🧠 JARVIS ARG comenzando...\nDecí algo cuando estés listo (tarda más en escucharte).")
+
     while True:
-        texto = escuchar()
-        
-        if not texto:
-            hablar("No te escuché bien, ¿podés repetirlo?")
+        texto_usuario = escuchar_microfono(timeout=20)
+        if not texto_usuario:
+            responder_voz("No te entendí, ¿podés repetir más claro?")
             continue
-            
-        if any(palabra in texto for palabra in ["adiós", "chau", "hasta luego", "nos vemos"]):
-            hablar("¡Bueno, nos vemos! Cualquier cosa me chiflás.")
+
+        if "salir" in texto_usuario.lower():
+            responder_voz("Listo, nos vemos, maestro.")
             break
-            
-        respuesta = generar_respuesta(texto)
-        print(f"Gemma: {respuesta}")
-        hablar(respuesta)
+
+        respuesta = responder_con_gemma(texto_usuario)
+        responder_voz(respuesta)
 
 if __name__ == "__main__":
-    print("Iniciando asistente con Gemma:2b...")
-    conversacion()
+    main()
